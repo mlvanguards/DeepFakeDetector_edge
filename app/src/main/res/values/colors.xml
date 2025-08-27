@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- DeepfakeGuard Theme Colors -->
+    <color name="primary_color">#FF2E7D32</color>
+    <color name="primary_dark">#FF1B5E20</color>
+    <color name="accent_color">#FF1976D2</color>
+    
+    <!-- Status Colors -->
+    <color name="success_color">#FF4CAF50</color>
+    <color name="warning_color">#FFFF9800</color>
+    <color name="error_color">#FFF44336</color>
+    
+    <!-- Background Colors -->
+    <color name="background_color">#FFF5F5F5</color>
+    <color name="card_background">#FFFFFFFF</color>
+    <color name="secondary_button">#FFE0E0E0</color>
+    
+    <!-- Text Colors -->
+    <color name="primary_text">#FF212121</color>
+    <color name="secondary_text">#FF757575</color>
+</resources>

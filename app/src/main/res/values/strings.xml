@@ -1,0 +1,9 @@
+<resources>
+    <string name="app_name">DeepfakeGuard</string>
+    <string name="notification_channel_name">Deepfake Detection</string>
+    <string name="notification_channel_description">Real-time deepfake detection during calls</string>
+    <string name="service_notification_title">DeepfakeGuard Active</string>
+    <string name="deepfake_detected">⚠️ DEEPFAKE DETECTED</string>
+    <string name="audio_authentic">✅ Audio authentic</string>
+    <string name="analyzing">🔍 Analyzing...</string>
+</resources>
