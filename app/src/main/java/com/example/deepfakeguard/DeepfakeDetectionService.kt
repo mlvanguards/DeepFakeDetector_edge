@@ -41,9 +41,10 @@ class DeepfakeDetectionService : Service() {
         private const val AUDIO_FORMAT = AudioFormat.ENCODING_PCM_16BIT
         private const val BUFFER_SIZE_FACTOR = 4
         
-        // Model input specs - CRNN mel spectrogram [2, 64, 300]
-        private const val MODEL_INPUT_SIZE = 2 * 64 * 300  // 38400 elements
-        private const val AUDIO_CHUNK_DURATION_MS = 4000   // 4s chunks (training match)
+        // Model input specs - 3-channel features [3, 64, 493] (MelSpec, MFCC, LFCC)
+        private const val NUM_FEATURE_CHANNELS = 3         // MelSpectrogram, MFCC, LFCC
+        private const val NUM_FEATURE_BINS = 64            // Feature dimension
+        private const val AUDIO_CHUNK_DURATION_MS = 6000   // 6s chunks (training match)
         private const val OVERLAP_DURATION_MS = 500        // 0.5s overlap
     }
     
@@ -542,18 +543,19 @@ class DeepfakeDetectionService : Service() {
                 Timber.d("📊 Chunk $chunkId: max=$max, rms=$rms, nonZero=$nonZero")
             }
             
-            // Generate mel spectrogram from stereo audio chunk
-            val melSpectrogram = audioProcessor.generateMelSpectrogram(audioData, SAMPLE_RATE)
+            // Generate 3-channel features (MelSpec, MFCC, LFCC)
+            val featuresResult = audioProcessor.generateMultiChannelFeatures(audioData, SAMPLE_RATE)
             
-            if (melSpectrogram.size != MODEL_INPUT_SIZE) {
-                Timber.w("Mel spectrogram size mismatch: expected $MODEL_INPUT_SIZE, got ${melSpectrogram.size}")
+            if (featuresResult.error != null) {
+                Timber.w("Feature extraction failed: ${featuresResult.error}")
                 return
             }
             
-            // Convert mel spectrogram to PyTorch tensor [1, 2, 64, 300]
+            // Convert features to PyTorch tensor [1, 3, 64, T]
+            val shape = featuresResult.shape
             val inputTensor = Tensor.fromBlob(
-                melSpectrogram, 
-                longArrayOf(1, 2, 64, 300)  // [batch, channels, mel_bins, time_steps]
+                featuresResult.features, 
+                longArrayOf(1, shape[0].toLong(), shape[1].toLong(), shape[2].toLong())
             )
             
             // Run inference
@@ -653,9 +655,9 @@ class DeepfakeDetectionService : Service() {
                     audioData
                 }
             
-            // Match training preprocessing: ensure stereo and exactly 4 seconds
-            val maxLen = SAMPLE_RATE * (AUDIO_CHUNK_DURATION_MS / 1000)  // 4 seconds in samples
-            val expectedSamples = maxLen * 2  // Stereo interleaved
+            // Match training preprocessing: ensure exactly 6 seconds  
+            val maxLen = SAMPLE_RATE * (AUDIO_CHUNK_DURATION_MS / 1000)  // 6 seconds in samples
+            val expectedSamples = maxLen * 2  // Stereo interleaved (will be converted to mono)
             
             // If input is mono (half expected size), convert to stereo by repeating
             val processedStereo = if (processedAudio.size < expectedSamples / 2) {
@@ -671,7 +673,7 @@ class DeepfakeDetectionService : Service() {
                 processedAudio
             }
             
-            // Pad or trim to exactly 4 seconds stereo
+            // Pad or trim to exactly 6 seconds stereo
             val processedAudioPadded = when {
                 processedStereo.size > expectedSamples -> {
                     // Take first 4 seconds
@@ -688,16 +690,16 @@ class DeepfakeDetectionService : Service() {
             
                 Timber.d("Final audio samples: ${processedAudioPadded.size} (expected: $expectedSamples)")
                 
-                // Generate mel spectrogram from stereo audio with timeout
-                Timber.d("🔄 Starting mel spectrogram generation...")
-                val melStartTime = System.currentTimeMillis()
+                // Generate 3-channel features from audio with timeout
+                Timber.d("🔄 Starting multi-channel feature extraction...")
+                val featureStartTime = System.currentTimeMillis()
                 
-                val melSpectrogram = try {
+                val featuresResult = try {
                     withTimeout(30000) { // 30 second timeout
-                        audioProcessor.generateMelSpectrogram(processedAudioPadded, SAMPLE_RATE)
+                        audioProcessor.generateMultiChannelFeatures(processedAudioPadded, SAMPLE_RATE)
                     }
                 } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
-                    Timber.e("❌ Mel spectrogram generation timed out after 30 seconds")
+                    Timber.e("❌ Feature extraction timed out after 30 seconds")
                     return@withContext AudioAnalysisResult(
                         isFake = false,
                         confidence = 0f,
@@ -705,14 +707,14 @@ class DeepfakeDetectionService : Service() {
                         realConfidence = 1f,
                         processingTimeMs = System.currentTimeMillis() - startTime,
                         audioLengthMs = actualAudioLengthMs,
-                        error = "Mel spectrogram generation timed out - audio processing too slow"
+                        error = "Feature extraction timed out - audio processing too slow"
                     )
                 }
                 
-                val melEndTime = System.currentTimeMillis()
-                Timber.d("✅ Mel spectrogram generated in ${melEndTime - melStartTime}ms")
+                val featureEndTime = System.currentTimeMillis()
+                Timber.d("✅ Multi-channel features generated in ${featureEndTime - featureStartTime}ms")
                 
-                if (melSpectrogram.size != MODEL_INPUT_SIZE) {
+                if (featuresResult.error != null) {
                     return@withContext AudioAnalysisResult(
                         isFake = false,
                         confidence = 0f,
@@ -720,25 +722,27 @@ class DeepfakeDetectionService : Service() {
                         realConfidence = 1f,
                         processingTimeMs = System.currentTimeMillis() - startTime,
                         audioLengthMs = actualAudioLengthMs,
-                        error = "Mel spectrogram size mismatch: expected $MODEL_INPUT_SIZE, got ${melSpectrogram.size}"
+                        error = "Feature extraction failed: ${featuresResult.error}"
                     )
                 }
             
-                // Convert mel spectrogram to PyTorch tensor [1, 2, 64, 300]
+                // Convert features to PyTorch tensor [1, 3, 64, T]
+                val shape = featuresResult.shape
                 val inputTensor = Tensor.fromBlob(
-                    melSpectrogram, 
-                    longArrayOf(1, 2, 64, 300)  // [batch, channels, mel_bins, time_steps]
+                    featuresResult.features, 
+                    longArrayOf(1, shape[0].toLong(), shape[1].toLong(), shape[2].toLong())
                 )
                 
                 // Validate input tensor
                 Timber.d("Input tensor shape: [${inputTensor.shape().contentToString()}]")
-                val inputStats = melSpectrogram.let {
+                val inputStats = featuresResult.features.let {
                     val min = it.minOrNull() ?: 0f
                     val max = it.maxOrNull() ?: 0f
                     val mean = it.average().toFloat()
                     "min=$min, max=$max, mean=$mean"
                 }
                 Timber.d("Input tensor stats: $inputStats")
+                Timber.d("Feature channels: ${shape[0]}, Feature bins: ${shape[1]}, Time steps: ${shape[2]}")
                 
                 // Run inference
                 Timber.d("🔄 Running model inference...")
