@@ -1,155 +1,170 @@
-# DeepfakeGuard - Real-time Deepfake Audio Detection
+# DeepfakeDetector - Real-time Deepfake Audio Detection
 
-An Android application that detects deepfake audio in real-time during phone calls using on-device machine learning.
+A complete edge deployment pipeline for real-time deepfake detection during phone calls. This Android application uses multi-channel feature extraction and on-device PyTorch Mobile inference to detect synthetic audio without cloud connectivity. This project is the implementation of the solution described in **Deepfakes on the Edge: Building Smarter Detection Where It Counts.**
+
+![DeepfakeDetector Workflow](images/deepfake_edge_workflow.webp)
+
+## Table of Contents
+- [Overview](#overview)
+- [Features](#features)
+- [Key Technical Achievements](#key-technical-achievements)
+- [Prerequisites](#prerequisites)
+- [Installation](#installation)
+- [Usage](#usage)
+- [Core Components](#core-components)
+- [Project Structure](#project-structure)
+- [Development](#development)
+- [License](#license)
+
+## Overview
+
+This project implements a complete pipeline for edge-deployed deepfake detection, from feature extraction to real-time inference.
+
+**Feature Extraction Process:**
+- Multi-channel audio analysis: MelSpectrogram, MFCC, LFCC features
+- 6-second audio chunks processed at 16kHz sample rate
+- Dynamic tensor shapes with time alignment across feature channels
+- Real-time processing with <1s latency per chunk
+
+**Model Training & Deployment:**
+- 3-channel input tensor: `[batch, 3, 64, time_steps]`
+- PyTorch Mobile quantized models for edge deployment
+- Binary classification with sigmoid activation
+- CPU inference optimized for Android devices
+
+**Edge Integration:**
+- Android foreground service with automatic call detection
+- Real-time visual overlay with confidence-based threat levels
+- 100% local processing - no network connectivity required
+- Privacy-first design with in-memory audio processing
 
 ## Features
 
-- **Real-time Detection**: Analyzes audio during phone calls to detect synthetic/deepfake audio
-- **Fully Local**: All processing happens on-device using PyTorch Mobile for maximum privacy
-- **Visual Overlay**: Shows detection results in real-time during calls
-- **Call Monitoring**: Automatically starts monitoring when phone calls begin/end
-- **Audio Analysis**: Uses advanced audio features (MFCC, spectral features) for detection
+- **Multi-Channel Analysis**: MelSpectrogram + MFCC + LFCC feature extraction
+- **Edge Deployment**: PyTorch Mobile with CPU-optimized inference
+- **Real-Time Alerts**: Visual overlay with confidence-based threat detection
+- **Auto-Activation**: Foreground service monitors calls automatically
+- **Privacy-First**: 100% local processing, no data transmission
+- **Cross-Architecture**: ARM64-v8a and ARMv7 Android support
 
-## Setup Instructions
+## Key Technical Achievements
 
-### 1. Convert Your CRNN Model
+**Performance Metrics:**
+- Real-time processing: <1s inference per 6-second audio chunk
+- Memory efficiency: ~50-100MB during active inference
+- Audio processing: 3-channel feature extraction with time alignment
+- Model deployment: PyTorch Mobile .pt format for edge optimization
 
-Convert your trained CRNN `.pth` model file to `.pt` format for mobile deployment:
+**Architecture Highlights:**
+- Feature extraction: n_fft=780, hop_length=195, 64 feature bins
+- Input tensor: Dynamic time dimension `[1, 3, 64, T]`
+- Multi-channel DCT: Applied to mel and linear spectrograms
+- Alert system: Confidence thresholds with visual feedback
 
+## Prerequisites
+
+- Android device (API 24+)
+- Trained PyTorch model (.pt format)
+- Android Studio for development
+- Phone call recording capabilities
+
+## Installation
+
+### 1. Add Model to App
 ```bash
-# Basic conversion
-python convert_model.py --input your_model.pth --output deepfake_detector.pt --analyze
-
-# If your model has different hyperparameters
-python convert_model.py --input your_model.pth --hidden_size 128 --num_layers 1 --dropout 0.2
+# Place your trained model
+cp your_model.pt app/src/main/assets/models/deepfake_detector.pt
 ```
 
-### 2. Test Your Conversion (Recommended)
-
-Verify the conversion works correctly:
-
-```bash
-# Test with synthetic audio
-python convert_and_test.py --model_path your_model.pth --visualize
-
-# Test with real audio file
-python convert_and_test.py --model_path your_model.pth --audio_file test_audio.wav
-```
-
-### 3. Add Model to App
-
-1. Copy the generated `deepfake_detector.pt` file to `app/src/main/assets/models/`
-2. The model expects mel spectrogram input: `[batch, 2_channels, 64_mel_bins, 300_time_steps]`
-
-### 4. Build and Install
-
+### 2. Build and Install
 ```bash
 ./gradlew assembleDebug
 adb install app/build/outputs/apk/debug/app-debug.apk
 ```
 
-### 5. Grant Permissions
-
-The app requires several permissions for call monitoring:
-- Phone state access
-- Audio recording
-- Overlay permissions (for showing detection results)
-- Foreground service permissions
-
-## Architecture
-
-### Core Components
-
-- **PhoneStateReceiver**: Detects incoming/outgoing calls
-- **DeepfakeDetectionService**: Main service that runs detection during calls
-- **AudioProcessor**: Generates mel spectrograms from stereo audio
-- **OverlayView**: Shows real-time detection results during calls
-- **MainActivity**: Main UI for app configuration and status
-
-### Audio Processing Pipeline
-
-1. **Audio Capture**: Records stereo call audio using `AudioRecord` with `VOICE_CALL` source
-2. **Mel Spectrogram Generation**: Converts 4-second stereo audio chunks to mel spectrograms:
-   - Input: Stereo audio (2 channels) at 16kHz
-   - STFT with n_fft=780, hop_length=195
-   - Mel filter bank with 64 mel bins
-   - Convert to dB scale (top_db=80)
-   - Output shape: [2, 64, 300] (channels, mel_bins, time_steps)
-3. **Model Inference**: Runs mel spectrograms through CRNN PyTorch Mobile model
-4. **Result Display**: Shows probability scores and detection status in overlay
-
-### CRNN Model Requirements
-
-Your CRNN model should:
-- **Architecture**: ResNet18 backbone + BiGRU + Attention pooling
-- **Input shape**: `[batch_size, 2, 64, 300]` (stereo mel spectrograms)
-- **Output**: Binary classification `[real_probability, fake_probability]`
-- **Audio specs**: 16kHz stereo, 4-second duration
-- **Compatible with**: PyTorch 2.1.0, CPU inference
+### 3. Grant Permissions
+Required permissions:
+- Phone state access, Audio recording, System overlay
+- Foreground service (microphone + phone call types)
 
 ## Usage
 
-1. **Start Monitoring**: Open the app and tap "Start Monitoring"
-2. **Automatic Detection**: The service will automatically activate during phone calls
-3. **View Results**: Real-time detection results appear as an overlay during calls
-4. **Check History**: View detection logs and statistics in the app
+### Real-Time Detection
+1. **Auto-Activation**: Service starts automatically during phone calls
+2. **Visual Alerts**: Real-time overlay shows detection status:
+   - 🔍 **Yellow**: Analyzing audio chunks
+   - ✅ **Green**: Authentic speech detected
+   - ⚠️ **Red**: High-confidence deepfake (>70%)
+3. **Privacy**: All processing occurs locally, no data transmission
 
-## Model Training
+### Example Detection Flow
+```kotlin
+// Generate 3-channel features (MelSpec, MFCC, LFCC)
+val featuresResult = audioProcessor.generateMultiChannelFeatures(audioData, SAMPLE_RATE)
 
-The conversion scripts support the CRNN architecture with ResNet18 + BiGRU + Attention:
+// Convert features to PyTorch tensor [1, 3, 64, T]
+val inputTensor = Tensor.fromBlob(featuresResult.features, shape)
 
-1. **Architecture**: Use the provided `CRNNWithAttn` class or ensure your model matches this structure
-2. **Training Data**: 4-second stereo audio at 16kHz sample rate
-3. **Preprocessing**: Mel spectrograms with n_mels=64, n_fft=780, hop_length=195
-4. **Output**: Binary classification with sigmoid activation
-5. **Augmentation**: Time shift, noise, pitch shift, spectral masking (as shown in your training code)
+// Run inference and get confidence
+val outputTensor = deepfakeModel.forward(IValue.from(inputTensor)).toTensor()
+val fakeProb = sigmoid(outputTensor.dataAsFloatArray[0])
+```
 
-## Privacy & Security
+## Core Components
 
-- **No Data Collection**: All processing happens locally on the device
-- **No Network Requests**: Model inference is completely offline
-- **Secure Audio**: Audio is processed in memory and not stored permanently
-- **Permission Transparency**: All required permissions are clearly explained
+### Audio Processing
+- **AudioProcessor**: Multi-channel feature extraction (MelSpec, MFCC, LFCC)
+- **DeepfakeDetectionService**: Edge deployment service with foreground monitoring
+- **PhoneStateReceiver**: Automatic call detection and service activation
 
-## Technical Specifications
+### User Interface
+- **OverlayView**: Real-time visual alerts with confidence-based threat levels
+- **MainActivity**: App configuration and monitoring controls
 
-- **Minimum Android Version**: API 24 (Android 7.0)
-- **Target Architecture**: ARM64-v8a, ARMv7
-- **Model Format**: PyTorch Mobile (.pt)
-- **Audio Format**: 16kHz stereo PCM
-- **Input Dimensions**: [2, 64, 300] mel spectrogram per 4-second chunk
-- **Model Architecture**: ResNet18 + BiGRU + Attention (~11M parameters)
-- **Detection Latency**: ~200-800ms per chunk (depending on device)
-- **Memory Usage**: ~50-100MB during inference
+### Model Integration
+- **PyTorch Mobile**: Quantized model deployment for CPU inference
+- **Feature Pipeline**: 6-second audio chunks → 3-channel features → inference
 
-## Troubleshooting
+## Project Structure
 
-### Model Loading Issues
-- Ensure model file is in `app/src/main/assets/models/deepfake_detector.pt`
-- Check that model input shape is [1, 2, 64, 300] (stereo mel spectrograms)
-- Verify model was converted with the correct CRNN architecture
-- Test conversion with `convert_and_test.py` before deploying
+```
+DeepFakeDetector_edge/
+├── app/src/main/
+│   ├── java/com/example/deepfakeguard/
+│   │   ├── AudioProcessor.kt           # Multi-channel feature extraction
+│   │   ├── DeepfakeDetectionService.kt # Edge deployment service
+│   │   ├── OverlayView.kt             # Real-time visual alerts
+│   │   └── PhoneStateReceiver.kt      # Call detection
+│   ├── assets/models/                 # PyTorch Mobile models
+│   └── AndroidManifest.xml           # Permissions and services
+├── notebooks/                         # Training notebooks
+└── README.md
+```
 
-### Permission Issues
-- Grant all required permissions through the app settings
-- Enable overlay permissions for call-time display
-- Check phone state access permissions
-- Ensure foreground service permissions are granted
+## Development
 
-### Audio Capture Issues
-- Test on different devices (call audio access varies by manufacturer)
-- Ensure `VOICE_CALL` audio source is available
-- Check if device supports stereo call recording
-- Some devices may only provide mono audio from calls
+### Model Requirements
+- **Input Shape**: `[batch, 3, 64, time_steps]`
+- **Feature Channels**: MelSpectrogram, MFCC, LFCC (64 bins each)
+- **Audio Format**: 16kHz mono, 6-second duration
+- **Output Format**: Binary classification with sigmoid activation
 
-## Contributing
+### Adding New Features
+1. Implement feature extraction in `AudioProcessor.kt`
+2. Update tensor shapes in `DeepfakeDetectionService.kt`
+3. Modify overlay alerts in `OverlayView.kt`
 
-1. Fork the repository
-2. Create a feature branch
-3. Test thoroughly on real devices
-4. Submit a pull request
+### Key Dependencies
+- PyTorch Mobile (Android)
+- Android NDK for audio processing
+- Foreground service framework
 
-## License
+License
+This project is licensed under the MIT License - see the LICENSE file for details.
 
-This project is for educational and research purposes. Ensure compliance with local laws regarding call recording and audio monitoring.
+All courses.
 
+* [Part 1: Audio deepfake fraud detection system](https://thehyperplane.substack.com/p/audio-deepfake-fraud-detection-system?r=5l0jbv)  
+* [Part 2: Training a model to detect deepfake audio](https://thehyperplane.substack.com/p/training-a-model-to-detect-deepfake?r=5l0jbv)
+* [Deepfakes on the Edge: Building Smarter Detection Where It Counts](https://thehyperplane.substack.com/p/training-a-model-to-detect-deepfake?r=5l0jbv)
+* [Beyond the Cloud: Why the Future of AI Is on the Edge](https://thehyperplane.substack.com/p/beyond-the-cloud-why-the-future-of?r=5l0jbv)
